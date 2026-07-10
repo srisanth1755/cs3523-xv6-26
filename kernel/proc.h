@@ -84,6 +84,12 @@ enum procstate { UNUSED, USED, SLEEPING, RUNNABLE, RUNNING, ZOMBIE };
 // Per-process state
 struct proc {
   struct spinlock lock;
+  // ===== PA2: SC-MLFQ fields =====
+  int current_queue;        // 0–3 (0 highest)
+  int ticks_used;           // ticks used in current slice
+  int ticks[4];             // total ticks per level
+  int times_scheduled;      // number of times scheduled
+  int last_syscall_count;   // for ΔS computation
 
   // p->lock must be held when using these:
   enum procstate state;        // Process state
@@ -104,4 +110,19 @@ struct proc {
   struct file *ofile[NOFILE];  // Open files
   struct inode *cwd;           // Current directory
   char name[16];               // Process name (debugging)
+  int syscount;
+
 };
+
+struct mlfqinfo {
+  int level;
+  int ticks[4];
+  int times_scheduled;
+  int total_syscalls;
+};
+// // SC-MLFQ fields
+// int level;                  // 0–3 (0 highest)
+// int ticks_used;             // ticks in current time slice
+// int ticks[4];               // total ticks at each level
+// int times_scheduled;        // number of times scheduled
+// uint64 syscall_snapshot;    // syscall count at slice start

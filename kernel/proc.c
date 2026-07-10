@@ -12,6 +12,30 @@ struct proc proc[NPROC];
 
 struct proc *initproc;
 
+uint64 global_ticks = 0;
+
+int mlfq_quantum[4] = {2, 4, 8, 16};
+
+void
+priority_boost(void)
+{
+  struct proc *p;
+  for(p = proc; p < &proc[NPROC]; p++) {
+    acquire(&p->lock);
+    if(p->state == RUNNABLE || p-> state == RUNNING)
+      p->current_queue = 0;
+    release(&p->lock);
+  }
+}
+
+uint64
+getsyscount(void)
+{
+  struct proc *p = myproc();
+  return p->syscount;
+}
+
+
 int nextpid = 1;
 struct spinlock pid_lock;
 
@@ -110,7 +134,10 @@ static struct proc*
 allocproc(void)
 {
   struct proc *p;
+    // ===== PA2 initialization =====
+  
 
+  
   for(p = proc; p < &proc[NPROC]; p++) {
     acquire(&p->lock);
     if(p->state == UNUSED) {
@@ -124,6 +151,22 @@ allocproc(void)
 found:
   p->pid = allocpid();
   p->state = USED;
+  p->syscount = 0;
+  
+  // p->current_queue = 0;      // start at highest priority
+  // p->ticks_used = 0;
+  // p->times_scheduled = 0;
+  // p->last_syscall_count = 0;
+  p->current_queue = 0;
+  p->ticks_used = 0;
+  p->times_scheduled = 0;
+  p->last_syscall_count = 0;
+
+  for(int i = 0; i < 4; i++)
+      p->ticks[i] = 0;
+
+  // for(int i = 0; i < 4; i++)
+  //     p->ticks[i] = 0;
 
   // Allocate a trapframe page.
   if((p->trapframe = (struct trapframe *)kalloc()) == 0){
@@ -421,43 +464,116 @@ kwait(uint64 addr)
 //  - swtch to start running that process.
 //  - eventually that process transfers control
 //    via swtch back to the scheduler.
+// void
+// scheduler(void)
+// {
+//   struct proc *p;
+//   struct cpu *c = mycpu();
+//   // int mlfq_quantum[4] = {2, 4, 8, 16};
+//   //static int last_idx[4] = {0};
+
+//   c->proc = 0;
+//   for(;;){
+//     // The most recent process to run may have had interrupts
+//     // turned off; enable them to avoid a deadlock if all
+//     // processes are waiting. Then turn them back off
+//     // to avoid a possible race between an interrupt
+//     // and wfi.
+//     intr_on();
+//     intr_off();
+
+//     int found = 0;
+//     // for(p = proc; p < &proc[NPROC]; p++) {
+//     //   acquire(&p->lock);  
+//     //   if(p->state == RUNNABLE) {
+//     //     // Switch to chosen process.  It is the process's job
+//     //     // to release its lock and then reacquire it
+//     //     // before jumping back to us.
+//     //     p->state  = RUNNING;
+//     //     c->proc = p;
+//     //     swtch(&c->context, &p->context);
+
+//     //     // Process is done running for now.
+//     //     // It should have changed its p->state before coming back.
+//     //     c->proc = 0;
+//     //     found = 1;
+//     //   }
+//     //   release(&p->lock);
+//     // }
+//     // ===== SC-MLFQ priority scan =====
+//   // ===== SC-MLFQ priority scan =====
+//     for(int level = 0; level <4 ;level++){
+
+//       int start = last_idx[level];
+//       for(int i = 0; i < NPROC; i++){
+//         int idx = (start + i) % NPROC;
+//         p = &proc[idx];
+
+//         acquire(&p->lock);
+
+//         if(p->state != RUNNABLE || p->current_queue != level){
+//           release(&p->lock);
+//           continue;
+//         }
+
+//         // remember position
+//         last_idx[level] = (idx + 1) % NPROC;
+
+//         p->state = RUNNING;
+//         p->times_scheduled++;
+//         //p->last_syscall_count = p->syscount;
+        
+
+//         c->proc = p;
+//         swtch(&c->context, &p->context);
+//         c->proc = 0;
+
+//         found = 1;
+//         release(&p->lock);
+//         goto done_scanning;
+//       }
+//     }
+
+//     done_scanning:
+//     ;
+//     if(found == 0) {
+//       // nothing to run; stop running on this core until an interrupt.
+//       asm volatile("wfi");
+//     }
+//   }
+// }
+
 void
 scheduler(void)
 {
   struct proc *p;
   struct cpu *c = mycpu();
-
   c->proc = 0;
+
   for(;;){
-    // The most recent process to run may have had interrupts
-    // turned off; enable them to avoid a deadlock if all
-    // processes are waiting. Then turn them back off
-    // to avoid a possible race between an interrupt
-    // and wfi.
     intr_on();
-    intr_off();
 
-    int found = 0;
-    for(p = proc; p < &proc[NPROC]; p++) {
-      acquire(&p->lock);
-      if(p->state == RUNNABLE) {
-        // Switch to chosen process.  It is the process's job
-        // to release its lock and then reacquire it
-        // before jumping back to us.
-        p->state = RUNNING;
-        c->proc = p;
-        swtch(&c->context, &p->context);
+    for(int lvl = 0; lvl < 4; lvl++) {
 
-        // Process is done running for now.
-        // It should have changed its p->state before coming back.
-        c->proc = 0;
-        found = 1;
+      for(p = proc; p < &proc[NPROC]; p++) {
+
+        acquire(&p->lock);
+
+        if(p->state == RUNNABLE && p->current_queue == lvl) {
+
+          p->state = RUNNING;
+          p->times_scheduled++;
+          p->last_syscall_count = p->syscount;  
+          p->ticks_used = 0;
+
+          c->proc = p;
+          swtch(&c->context, &p->context);
+          c->proc = 0;
+
+        }
+
+        release(&p->lock);
       }
-      release(&p->lock);
-    }
-    if(found == 0) {
-      // nothing to run; stop running on this core until an interrupt.
-      asm volatile("wfi");
     }
   }
 }
@@ -688,3 +804,5 @@ procdump(void)
     printf("\n");
   }
 }
+
+

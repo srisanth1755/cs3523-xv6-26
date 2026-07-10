@@ -1,6 +1,21 @@
 #define SBRK_ERROR ((char *)-1)
 
+
+
 struct stat;
+
+#ifndef MLFQINFO_STRUCT
+#define MLFQINFO_STRUCT
+
+// ===== PA2: user-visible MLFQ info =====
+struct mlfqinfo {
+  int level;
+  int ticks[4];
+  int times_scheduled;
+  int total_syscalls;
+};
+
+#endif
 
 // system calls
 int fork(void);
@@ -23,6 +38,7 @@ int dup(int);
 int getpid(void);
 char* sys_sbrk(int,int);
 int pause(int);
+int sleep(int);
 int uptime(void);
 
 // ulib.c
@@ -47,3 +63,13 @@ void printf(const char*, ...) __attribute__ ((format (printf, 1, 2)));
 // umalloc.c
 void* malloc(uint);
 void free(void*);
+
+int hello(void);
+int getpid2(void);  
+int getppid(void);
+int getnumchild(void);
+int getsyscount(void);
+int getchildsyscount(int);
+int getlevel(void);
+int getmlfqinfo(int pid, struct mlfqinfo *info);
+

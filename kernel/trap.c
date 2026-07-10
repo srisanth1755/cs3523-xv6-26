@@ -6,6 +6,8 @@
 #include "proc.h"
 #include "defs.h"
 
+extern struct proc proc[NPROC];
+
 struct spinlock tickslock;
 uint ticks;
 
@@ -15,6 +17,9 @@ extern char trampoline[], uservec[];
 void kernelvec();
 
 extern int devintr();
+
+// int mlfq_quantum[4] = {2, 4, 8, 16};
+// int global_ticks = 0;
 
 void
 trapinit(void)
@@ -80,10 +85,85 @@ usertrap(void)
   if(killed(p))
     kexit(-1);
 
-  // give up the CPU if this is a timer interrupt.
-  if(which_dev == 2)
-    yield();
+  // // give up the CPU if this is a timer interrupt.
+  // if(which_dev == 2)
+  //   yield();
+  if(which_dev == 2) {   // timer interrupt
 
+    struct proc *p = myproc();
+
+    if(p && p->state == RUNNING) {
+
+      //acquire(&p->lock);
+      p->ticks_used++;
+      p->ticks[p->current_queue]++;
+      if(p->ticks_used >= mlfq_quantum[p->current_queue]) {
+
+        uint64 deltaS = p->syscount - p->last_syscall_count;
+        int deltaT = p->ticks_used;
+        if(deltaS < deltaT) {
+          if(p->current_queue < 3)
+            p->current_queue++;
+        }
+
+        p->ticks_used = 0;
+
+        //release(&p->lock);
+
+        yield();
+        
+      }
+
+      //release(&p->lock);
+    }
+
+    //Global boost counter
+    global_ticks++;
+    if(global_ticks % 128 == 0)
+      priority_boost();
+  }
+  
+
+    // ===== SC-MLFQ timer handling =====
+  // if(which_dev == 2){
+  //   struct proc *p = myproc();
+
+  //   if(p){
+  //     p->ticks_used++;
+  //     p->ticks[p->current_queue]++; 
+  //     global_ticks++;
+
+  //     printf("tick pid %d level %d ticks %d\n",
+  //          p->pid, p->current_queue, p->ticks_used);
+
+  //     // check time slice expiry
+  //     if(p->ticks_used >= mlfq_quantum[p->current_queue]){
+
+  //       int deltaS = p->syscount - p->last_syscall_count;
+  //       int deltaT = p->ticks_used;
+
+  //       // syscall-aware rule
+  //       if(deltaS < deltaT && p->current_queue < 3){
+  //         p->current_queue++;   // demote CPU-bound process
+  //       }
+      
+  //       p->last_syscall_count = p->syscount;
+  //       p->ticks_used = 0;
+  //       yield();
+  //     }
+  //   }
+
+  //   // ===== global priority boost =====
+  //   if(global_ticks % 128 == 0){
+  //     for(struct proc *q = proc; q < &proc[NPROC]; q++){
+  //       acquire(&q->lock);
+  //       if(q->state == RUNNABLE){
+  //         q->current_queue = 0;
+  //       }
+  //       release(&q->lock);
+  //     }
+  //   }
+  // }
   prepare_return();
 
   // the user page table to switch to, for trampoline.S
@@ -154,6 +234,50 @@ kerneltrap()
   // give up the CPU if this is a timer interrupt.
   if(which_dev == 2 && myproc() != 0)
     yield();
+
+  // if(which_dev == 2){
+  //   struct proc *p = myproc();
+
+  //   if(p && p->state == RUNNING){
+      
+  //     if(p->ticks_used == 1) {
+  //         p->last_syscall_count = getsyscount();
+  //       }
+  //     //printf("tick pid %d level %d ticks %d\n",
+  //          //p->pid, p->current_queue, p->ticks_used);
+  //     p->ticks_used++;
+  //     global_ticks++;
+  //     p->ticks[p->current_queue]++; 
+
+  //     if(p->ticks_used >= mlfq_quantum[p->current_queue]){
+
+  //       int deltaS = getsyscount() - p->last_syscall_count;
+  //       int deltaT = p->ticks_used;
+  //       //printf("DEMOTE CHECK pid %d deltaS=%d deltaT=%d\n",
+  //       //p->pid, deltaS, deltaT);
+
+  //       if(deltaS < deltaT && p->current_queue < 3){
+  //         p->current_queue++;
+  //       }
+  //       p->ticks_used = 0;
+
+  //       //p->last_syscall_count = p->syscount;
+        
+  //       yield();
+  //     }
+  //   }
+
+  //   // global boost
+  //   if(global_ticks > 0 && global_ticks % 128 == 0){
+  //     for(struct proc *q = proc; q < &proc[NPROC]; q++){
+  //       acquire(&q->lock);
+  //       if(q->state == RUNNABLE){
+  //         q->current_queue = 0;
+  //       }
+  //       release(&q->lock);
+  //     }
+  //   }
+  
 
   // the yield() may have caused some traps to occur,
   // so restore trap registers for use by kernelvec.S's sepc instruction.

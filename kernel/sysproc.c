@@ -7,6 +7,7 @@
 #include "proc.h"
 #include "vm.h"
 
+extern struct proc proc[NPROC];
 uint64
 sys_exit(void)
 {
@@ -20,6 +21,51 @@ uint64
 sys_getpid(void)
 {
   return myproc()->pid;
+}
+
+
+uint64
+sys_getlevel(void)
+{
+  return myproc()->current_queue;
+}
+
+uint64
+sys_getmlfqinfo(void)
+{
+  int pid;
+  uint64 addr;
+  struct proc *p;
+  struct mlfqinfo info;
+
+  argint(0, &pid);
+  argaddr(1, &addr);
+
+  for(p = proc; p < &proc[NPROC]; p++) {
+    acquire(&p->lock);
+
+    if(p->pid == pid) {
+
+      info.level = p->current_queue;
+      info.times_scheduled = p->times_scheduled;
+      info.total_syscalls = p->syscount;
+
+      for(int i=0;i<4;i++)
+        info.ticks[i] = p->ticks[i];
+
+      release(&p->lock);
+
+      if(copyout(myproc()->pagetable, addr,
+                (char *)&info, sizeof(info)) < 0)
+        return -1;
+
+      return 0;
+    }
+
+    release(&p->lock);
+  }
+
+  return -1;
 }
 
 uint64
@@ -85,6 +131,84 @@ sys_pause(void)
   release(&tickslock);
   return 0;
 }
+
+uint64
+sys_hello(void)
+{
+  printf("Hello from the kernel!\n");
+  return 0;
+}
+
+uint64
+sys_getpid2(void)
+{
+  return myproc()->pid;
+}
+
+uint64
+sys_getppid(void)
+{
+  struct proc *p = myproc();
+
+  if (p->parent == 0)
+    return -1;
+
+  return p->parent->pid;
+}
+
+uint64
+sys_getnumchild(void)
+{
+  struct proc *p;
+  struct proc *cur = myproc();
+  int count = 0;
+
+  for(p = proc; p < &proc[NPROC]; p++){
+    acquire(&p->lock);
+    if(p->parent == cur && p->state != ZOMBIE){
+      count++;
+    }
+    release(&p->lock);
+  }
+
+  return count;
+}
+
+uint64
+sys_getsyscount(void)
+{
+  struct proc *p = myproc();
+  return p->syscount;
+}
+
+uint64
+sys_getchildsyscount(void)
+{
+  int pid;
+  struct proc *p;
+  struct proc *cur = myproc();
+  uint64 count = -1;
+
+  // argint returns void in this xv6 version
+  argint(0, &pid);
+
+  for(p = proc; p < &proc[NPROC]; p++){
+    acquire(&p->lock);
+
+    if(p->pid == pid &&
+       p->parent == cur &&
+       p->state != ZOMBIE){
+      count = p->syscount;
+      release(&p->lock);
+      return count;
+    }
+
+    release(&p->lock);
+  }
+
+  return -1;
+}
+
 
 uint64
 sys_kill(void)
